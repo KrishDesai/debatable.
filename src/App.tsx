@@ -146,6 +146,7 @@ function App() {
   return (
     <div className="App">
       <h1> Debatable. </h1>
+      <h3>The AI Powered Debate Assistant.</h3>
 
       <div className="input-group">
         <input

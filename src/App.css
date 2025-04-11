@@ -8,6 +8,12 @@
 h1 {
   text-align: center;
   color: #F55036;
+  margin-bottom: 1rem;
+}
+
+h3 {
+  text-align: center;
+  color: #fa7828;
   margin-bottom: 2rem;
 }
 
