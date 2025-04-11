@@ -1,0 +1,162 @@
+import os
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
+from groq import Groq
+from dotenv import load_dotenv
+import requests
+from typing import Optional
+from pydantic import BaseModel
+import json
+import logging
+import tempfile
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+load_dotenv()
+groq = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class DebateSettings(BaseModel):
+    topic: str
+    max_tokens: int = 500
+
+# generates the rebuttal
+def get_debate_prompt(transcription: str, settings: DebateSettings) -> str:
+    
+    return f"""
+    
+    Topic: {settings.topic}
+    User's Argument: "{transcription}"
+    
+    Structure your response in the following format:
+    1. Opening Statement (1 sentence)
+    2. Main Counterarguments (2 sentences)
+    4. Closing Statement (1 sentence)
+    
+    Give your speech like you are presenting in front of someone (no titles, subheadings, etc.)
+    """
+
+#analyze the response by the user and the AI 
+def get_analysis_prompt(transcription: str, rebuttal: str, topic: str) -> str:
+    return f"""
+    Analyze the following debate exchange and provide detailed feedback:
+
+    Topic: {topic}
+    User's Argument: "{transcription}"
+    AI's Rebuttal: "{rebuttal}"
+
+    Provide analysis in the following structure:
+
+    Argument Strength Analysis
+    - User's argument strengths
+    - User's argument weaknesses
+    - AI's rebuttal effectiveness
+
+    Improvement Suggestions
+    - Areas for improvement
+    - Specific recommendations
+    - Alternative approaches
+    
+    Keep the analysis constructive and focused on debate skills development.
+    Use bullet points instead of asterisks (*).
+    Do not use markdown formatting or special characters.
+    """
+
+#api endpoint
+@app.post("/debate/full")
+async def debate_full(
+    audio: UploadFile = File(...),
+    topic: str = Form(...),
+):
+    try:
+        logger.info("Starting debate processing")
+        
+        if not topic.strip():
+            raise HTTPException(status_code=400, detail="Topic cannot be empty")
+
+        logger.info("Processing stt")
+        audio_data = await audio.read()
+        
+        with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as temp_audio:
+            temp_audio.write(audio_data)
+            temp_audio_path = temp_audio.name
+
+        try:
+            with open(temp_audio_path, 'rb') as audio_file:
+                stt_response = requests.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}"},
+                    files={"file": (audio.filename or "recording.webm", audio_file, "audio/webm")},
+                    data={"model": "whisper-large-v3"}
+                )
+        finally:
+            os.unlink(temp_audio_path)
+        
+        if not stt_response.ok:
+            logger.error(f"Speech-to-text failed: {stt_response.text}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Speech-to-text conversion failed: {stt_response.text}"
+            )
+            
+        transcription = stt_response.json()["text"].strip()
+        logger.info(f"Transcription: {transcription}")
+   
+        logger.info("Generating rebuttal")
+        settings = DebateSettings(
+            topic=topic
+        )
+        
+        prompt = get_debate_prompt(transcription, settings)
+        response = groq.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[
+                {"role": "system", "content": "You are an intelligent debate opponent."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
+            max_tokens=settings.max_tokens,
+        )
+        rebuttal = response.choices[0].message.content.strip()
+        logger.info("Rebuttal generated successfully")
+        
+        logger.info("Generating analysis")
+        analysis_prompt = get_analysis_prompt(transcription, rebuttal, topic)
+        analysis_response = groq.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[
+                {"role": "system", "content": "You are a debate analysis expert."},
+                {"role": "user", "content": analysis_prompt},
+            ],
+            temperature=0.7,
+            max_tokens=500,
+        )
+        analysis = analysis_response.choices[0].message.content.strip()
+        logger.info("Analysis generated successfully")
+        
+        logger.info("Processing complete")
+        return JSONResponse(
+            content={
+                "transcription": transcription,
+                "rebuttal": rebuttal,
+                "analysis": analysis
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in debate processing: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/")
+async def root():
+    return {"message": "AI Debate Partner API is running"}
