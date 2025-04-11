@@ -1,6 +1,8 @@
 # Debatable. 
 Debatable is a AI-powered debate opponent/coach which can help debate participants practice different prompts, hear rebuttals and get insights into what they are doing right and where they can improve. 
 
+[Video Demo](https://www.loom.com/share/128d288d1ebe4e89bcef1091c16f86a1?sid=33d64e8d-ac5d-42af-9ed7-bd16b847df09).
+
 ## Prerequisites
 - Node.js (v14 or higher)
 - Python 3.8 or higher
