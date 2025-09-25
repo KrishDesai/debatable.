@@ -28,7 +28,7 @@ app.add_middleware(
 
 class DebateSettings(BaseModel):
     topic: str
-    max_tokens: int = 500
+    max_tokens: int = 1500
 
 # generates the rebuttal
 def get_debate_prompt(transcription: str, settings: DebateSettings) -> str:
@@ -70,6 +70,7 @@ def get_analysis_prompt(transcription: str, rebuttal: str, topic: str) -> str:
     Keep the analysis constructive and focused on debate skills development.
     Use bullet points instead of asterisks (*).
     Do not use markdown formatting or special characters.
+    DO NOT CUT OFF ANYTHING IN THE RESPONSE.
     """
 
 #api endpoint
@@ -86,19 +87,30 @@ async def debate_full(
 
         logger.info("Processing stt")
         audio_data = await audio.read()
+        logger.info(f"Audio data size: {len(audio_data)} bytes, filename: {audio.filename}")
         
-        with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as temp_audio:
+        # Determine file extension from filename
+        file_extension = '.webm'
+        if audio.filename:
+            if audio.filename.endswith('.mp4'):
+                file_extension = '.mp4'
+            elif audio.filename.endswith('.wav'):
+                file_extension = '.wav'
+        
+        with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as temp_audio:
             temp_audio.write(audio_data)
             temp_audio_path = temp_audio.name
 
         try:
             with open(temp_audio_path, 'rb') as audio_file:
+                logger.info(f"Sending STT request with file: {temp_audio_path}")
                 stt_response = requests.post(
                     "https://api.groq.com/openai/v1/audio/transcriptions",
                     headers={"Authorization": f"Bearer {os.getenv('GROQ_API_KEY')}"},
-                    files={"file": (audio.filename or "recording.webm", audio_file, "audio/webm")},
+                    files={"file": (audio.filename or f"recording{file_extension}", audio_file, f"audio/{file_extension[1:]}")},
                     data={"model": "whisper-large-v3"}
                 )
+                logger.info(f"STT response status: {stt_response.status_code}")
         finally:
             os.unlink(temp_audio_path)
         
@@ -119,7 +131,7 @@ async def debate_full(
         
         prompt = get_debate_prompt(transcription, settings)
         response = groq.chat.completions.create(
-            model="llama3-70b-8192",
+            model="openai/gpt-oss-20b",
             messages=[
                 {"role": "system", "content": "You are an intelligent debate opponent."},
                 {"role": "user", "content": prompt},
@@ -128,12 +140,13 @@ async def debate_full(
             max_tokens=settings.max_tokens,
         )
         rebuttal = response.choices[0].message.content.strip()
-        logger.info("Rebuttal generated successfully")
+        logger.info(f"Rebuttal generated successfully. Length: {len(rebuttal)} characters")
+        logger.info(f"Rebuttal preview: {rebuttal[:100]}...")
         
         logger.info("Generating analysis")
         analysis_prompt = get_analysis_prompt(transcription, rebuttal, topic)
         analysis_response = groq.chat.completions.create(
-            model="llama3-70b-8192",
+            model="openai/gpt-oss-20b",
             messages=[
                 {"role": "system", "content": "You are a debate analysis expert."},
                 {"role": "user", "content": analysis_prompt},

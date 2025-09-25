@@ -13,7 +13,6 @@ function App() {
   const [liveTranscription, setLiveTranscription] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const stopRecordingRef = useRef<() => void>(() => {});
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const synth = window.speechSynthesis;
@@ -95,8 +94,19 @@ function App() {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Try to use a more compatible audio format
+      let mimeType = 'audio/webm;codecs=opus';
+      if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      } else if (MediaRecorder.isTypeSupported('audio/wav')) {
+        mimeType = 'audio/wav';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      }
+      
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'  
+        mimeType: mimeType
       });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -108,14 +118,17 @@ function App() {
       mediaRecorder.onstop = async () => {
         setIsLoading(true);
         const audioBlob = new Blob(audioChunksRef.current, { 
-          type: 'audio/webm;codecs=opus'
+          type: mimeType
         });
         const formData = new FormData();
-        formData.append('audio', audioBlob, 'recording.webm');
+        const fileExtension = mimeType.includes('mp4') ? 'mp4' : 
+                             mimeType.includes('wav') ? 'wav' : 'webm';
+        formData.append('audio', audioBlob, `recording.${fileExtension}`);
         formData.append('topic', topic);
 
 
         try {
+          console.log('Sending audio to server...', { mimeType, fileExtension });
           const response = await axios.post('http://localhost:8000/debate/full', formData);
           
           setTranscription(response.data.transcription);
@@ -124,9 +137,15 @@ function App() {
 
           // Speak the rebuttal
           speakText(response.data.rebuttal);
-        } catch (error) {
+        } catch (error: any) {
           console.error('Error:', error);
-          alert('An error occurred while processing your debate. Please try again.');
+          if (error.response) {
+            console.error('Response data:', error.response.data);
+            console.error('Response status:', error.response.status);
+            alert(`Error: ${error.response.data?.detail || 'An error occurred while processing your debate. Please try again.'}`);
+          } else {
+            alert('An error occurred while processing your debate. Please try again.');
+          }
         } finally {
           setIsLoading(false);
           setIsRecording(false);
