@@ -11,7 +11,7 @@ Debatable is a AI-powered debate opponent/coach which can help debate participan
 ## Setup
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/KrishDesai/debatable.
 cd debatable.
 ```
 
