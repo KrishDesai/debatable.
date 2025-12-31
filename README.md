@@ -18,7 +18,7 @@ cd debatable.
 2. Set up the backend:
 ```bash
 cd server
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
